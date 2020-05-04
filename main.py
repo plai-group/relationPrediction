@@ -24,6 +24,9 @@ import pickle
 # %%
 # %%from torchviz import make_dot, make_dot_from_trace
 
+def str2bool(s):
+    return s.lower() in ['true', 't']
+
 
 def parse_args():
     args = argparse.ArgumentParser()
@@ -38,14 +41,14 @@ def parse_args():
                       default=5e-6, help="L2 reglarization for gat")
     args.add_argument("-w_conv", "--weight_decay_conv", type=float,
                       default=1e-5, help="L2 reglarization for conv")
-    args.add_argument("-pre_emb", "--pretrained_emb", type=bool,
+    args.add_argument("-pre_emb", "--pretrained_emb", type=str2bool,
                       default=True, help="Use pretrained embeddings")
     args.add_argument("-emb_size", "--embedding_size", type=int,
                       default=50, help="Size of embeddings (if pretrained not used)")
     args.add_argument("-l", "--lr", type=float, default=1e-3)
-    args.add_argument("-g2hop", "--get_2hop", type=bool, default=False)
-    args.add_argument("-u2hop", "--use_2hop", type=bool, default=True)
-    args.add_argument("-p2hop", "--partial_2hop", type=bool, default=False)
+    args.add_argument("-g2hop", "--get_2hop", type=str2bool, default=False)
+    args.add_argument("-u2hop", "--use_2hop", type=str2bool, default=True)
+    args.add_argument("-p2hop", "--partial_2hop", type=str2bool, default=False)   # NOTE this does nothing ???
     args.add_argument("-outfolder", "--output_folder",
                       default="./checkpoints/wn/out/", help="Folder name to save the models.")
 
@@ -81,10 +84,6 @@ def parse_args():
     return args
 
 
-args = parse_args()
-# %%
-
-
 def load_data(args):
     train_data, validation_data, test_data, entity2id, relation2id, headTailSelector, unique_entities_train = build_data(
         args.data, is_unweigted=False, directed=True)
@@ -106,31 +105,34 @@ def load_data(args):
 
     return corpus, torch.FloatTensor(entity_embeddings), torch.FloatTensor(relation_embeddings)
 
+if __name__ == '__main__':
+    args = parse_args()
+    # %%
 
-Corpus_, entity_embeddings, relation_embeddings = load_data(args)
-
-
-if(args.get_2hop):
-    file = args.data + "/2hop.pickle"
-    with open(file, 'wb') as handle:
-        pickle.dump(Corpus_.node_neighbors_2hop, handle,
-                    protocol=pickle.HIGHEST_PROTOCOL)
+    Corpus_, entity_embeddings, relation_embeddings = load_data(args)
 
 
-if(args.use_2hop):
-    print("Opening node_neighbors pickle object")
-    file = args.data + "/2hop.pickle"
-    with open(file, 'rb') as handle:
-        node_neighbors_2hop = pickle.load(handle)
+    if(args.get_2hop):   # NOTE I am not reimplementing this since the files already exist
+        file = args.data + "/2hop.pickle"
+        with open(file, 'wb') as handle:
+            pickle.dump(Corpus_.node_neighbors_2hop, handle,
+                        protocol=pickle.HIGHEST_PROTOCOL)
 
-entity_embeddings_copied = deepcopy(entity_embeddings)
-relation_embeddings_copied = deepcopy(relation_embeddings)
 
-print("Initial entity dimensions {} , relation dimensions {}".format(
-    entity_embeddings.size(), relation_embeddings.size()))
-# %%
+    if(args.use_2hop):
+        print("Opening node_neighbors pickle object")
+        file = args.data + "/2hop.pickle"
+        with open(file, 'rb') as handle:
+            node_neighbors_2hop = pickle.load(handle)
 
-CUDA = torch.cuda.is_available()
+    entity_embeddings_copied = deepcopy(entity_embeddings)  # NOTE not used anywhere
+    relation_embeddings_copied = deepcopy(relation_embeddings)
+
+    print("Initial entity dimensions {} , relation dimensions {}".format(
+        entity_embeddings.size(), relation_embeddings.size()))
+    # %%
+
+    CUDA = torch.cuda.is_available()
 
 
 def batch_gat_loss(gat_loss_func, train_indices, entity_embed, relation_embed):
@@ -171,8 +173,8 @@ def train_gat(args):
 
     print(
         "\nModel type -> GAT layer with {} heads used , Initital Embeddings training".format(args.nheads_GAT[0]))
-    model_gat = SpKBGATModified(entity_embeddings, relation_embeddings, args.entity_out_dim, args.entity_out_dim,
-                                args.drop_GAT, args.alpha, args.nheads_GAT)
+    model_gat = SpKBGATModified(entity_embeddings, relation_embeddings, args.entity_out_dim,
+                                args.entity_out_dim, args.drop_GAT, args.alpha, args.nheads_GAT)
 
     if CUDA:
         model_gat.cuda()
@@ -256,7 +258,6 @@ def train_gat(args):
 
         save_model(model_gat, args.data, epoch,
                    args.output_folder)
-
 
 def train_conv(args):
 
@@ -363,7 +364,7 @@ def evaluate_conv(args, unique_entities):
         Corpus_.get_validation_pred(args, model_conv, unique_entities)
 
 
-train_gat(args)
-
-train_conv(args)
-evaluate_conv(args, Corpus_.unique_entities_train)
+if __name__ == '__main__':
+    train_gat(args)
+    train_conv(args)
+    evaluate_conv(args, Corpus_.unique_entities_train)

@@ -26,18 +26,26 @@ def read_relation_from_id(filename='./data/WN18RR/relation2id.txt'):
 
 
 def init_embeddings(entity_file, relation_file):
-    entity_emb, relation_emb = [], []
+    raise NotImplementedError('Commented out due to duplication.')
+#     entity_emb, relation_emb = [], []
 
-    with open(entity_file) as f:
+#     with open(entity_file) as f:
+#         for line in f:
+#             entity_emb.append([float(val) for val in line.strip().split()])
+
+#     with open(relation_file) as f:
+#         for line in f:
+#             relation_emb.append([float(val) for val in line.strip().split()])
+
+#     return np.array(entity_emb, dtype=np.float32), np.array(relation_emb, dtype=np.float32)
+
+def init_embedding(fpath):
+
+    emb = []
+    with open(fpath) as f:
         for line in f:
-            entity_emb.append([float(val) for val in line.strip().split()])
-
-    with open(relation_file) as f:
-        for line in f:
-            relation_emb.append([float(val) for val in line.strip().split()])
-
-    return np.array(entity_emb, dtype=np.float32), np.array(relation_emb, dtype=np.float32)
-
+            emb.append([float(val) for val in line.strip().split()])
+    return np.array(emb, dtype=np.float32)
 
 def parse_line(line):
     line = line.strip().split()

@@ -4,9 +4,89 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 import time
 from layers import SpGraphAttentionLayer, ConvKB
+from create_batch import CorpusDataset, get_loaders
+from argparse import Namespace
+
+import ptutils as ptu
 
 CUDA = torch.cuda.is_available()  # checking cuda availability
 
+
+# begin my additions (some copied from other files) -------------------------------
+
+class GAT(ptu.CudaCompatibleMixin, ptu.HasDataloaderMixin, ptu.Trainable):
+
+    def get_optim_state(self):
+        return {'optim': self.optim.state_dict(),
+                'lr_scheduler': self.lr_scheduler.state_dict()}
+
+    def set_optim_state(self, state):
+        self.optim.load_state_dict(state['optim'])
+        self.lr_scheduler.load_state_dict(state['lr_scheduler'])
+
+    def init_optim(self, *, lr, weight_decay_conv):
+        self.optim = torch.optim.Adam(
+            self.parameters(), lr=lr, weight_decay=weight_decay_conv)
+        self.lr_scheduler = torch.optim.lr_scheduler.StepLR(
+            self.optim, step_size=25, gamma=0.5, last_epoch=-1)
+
+    def end_epoch(self):
+        self.lr_scheduler.step()
+        super().end_epoch()
+
+    def init_nn(self, **args):
+
+        args = Namespace(**args)
+        self.args = args
+        self.corpus = CorpusDataset(args)
+        self.current_batch_2hop_indices = self.corpus.get_current_batch_2hop_indices()
+
+        init_ent_emb, init_rel_emb = self.corpus.get_pretrained_embs()
+        self.spgat = SpKBGATModified(
+            initial_entity_emb=init_ent_emb,
+            initial_relation_emb=init_rel_emb,
+            entity_out_dim=args.entity_out_dim,
+            relation_out_dim=args.entity_out_dim,
+            drop_GAT=args.drop_GAT,
+            alpha=args.alpha,
+            nheads_GAT=args.nheads_GAT,
+        )
+
+        train_loader, valid_loader, test_loader = get_loaders(self.corpus)
+        self.set_dataloaders(train_loader, valid_loader, test_loader)
+
+    def loss(self, train_indices, train_values):
+
+        entity_embed, relation_embed = self.spgat(
+            self.corpus, self.corpus.train_adj_matrix, train_indices, self.current_batch_2hop_indices)
+        loss = self.loss_from_embeddings(train_indices, entity_embed, relation_embed)
+        self.log = {'loss': loss.item()}
+        return loss
+
+    def loss_from_embeddings(self, train_indices, entity_embed, relation_embed):
+
+        len_pos_triples = int(
+            train_indices.shape[0] / (int(self.args.valid_invalid_ratio_gat) + 1))
+
+        pos_triples = train_indices[:len_pos_triples].repeat(int(self.args.valid_invalid_ratio_gat), 1)
+        neg_triples = train_indices[len_pos_triples:]
+
+        def get_norm(triples):
+            source_embeds = entity_embed[triples[:, 0]]
+            relation_embeds = relation_embed[triples[:, 1]]
+            tail_embeds = entity_embed[triples[:, 2]]
+            x = source_embeds + relation_embeds - tail_embeds
+            return torch.norm(x, p=1, dim=1)
+        pos_norm = get_norm(pos_triples)
+        neg_norm = get_norm(neg_triples)
+
+        y = torch.ones(int(self.args.valid_invalid_ratio_gat) * len_pos_triples).cuda()
+
+        loss_func = nn.MarginRankingLoss(margin=self.args.margin)
+        loss = loss_func(pos_norm, neg_norm, y)
+        return loss
+
+# end my additions ------------------------------------------------------------------
 
 class SpGAT(nn.Module):
     def __init__(self, num_nodes, nfeat, nhid, relation_dim, dropout, alpha, nheads):

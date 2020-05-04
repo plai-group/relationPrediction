@@ -1,9 +1,91 @@
 import torch
+from torch.autograd import Variable
 import numpy as np
 from collections import defaultdict
 import time
 import queue
 import random
+import math
+import pickle
+import os
+
+from preprocess import init_embedding, build_data
+
+# begin my additions ----------------------------------------------------------------
+
+class CorpusDataset(torch.utils.data.Dataset):
+
+    def __init__(self, args):
+
+        self.args = args
+        self.directory = args.data
+
+        # avoid temptation to refactor below, it is not worth it ;(
+        train_data, validation_data, test_data, entity2id, relation2id, headTailSelector, unique_entities_train = build_data(args.data, is_unweigted=False, directed=True)
+
+        self.corpus = Corpus(args, train_data, validation_data, test_data,
+                             entity2id, relation2id, headTailSelector,
+                             args.batch_size_gat, args.valid_invalid_ratio_gat,
+                             unique_entities_train, args.get_2hop)
+
+    def get_pretrained_embs(self):
+        if self.args.pretrained_emb:
+            def get_emb_from_file(fname):
+                fpath = os.path.join(self.directory, fname)
+                return torch.FloatTensor(init_embedding(fpath))
+            initial_entity_embeddings = get_emb_from_file('entity2vec.txt')
+            initial_relation_embeddings = get_emb_from_file('relation2vec.txt')
+            print("Initialised relations and entities from TransE")
+        else:
+            raise NotImplementedError('Random initialisation not implemented.')
+        return initial_entity_embeddings, initial_relation_embeddings
+
+    def get_current_batch_2hop_indices(self):
+        # no idea why this is called `current_batch`
+        if self.args.use_2hop:
+            print("Opening node_neighbors pickle object.")
+            file = self.directory + "/2hop.pickle"
+            with open(file, 'rb') as handle:
+                node_neighbors_2hop = pickle.load(handle)
+        nbours = self.corpus.get_batch_nhop_neighbors_all(
+            self.args,
+            self.corpus.unique_entities_train,
+            node_neighbors_2hop,
+        )
+        return Variable(torch.LongTensor(nbours))
+
+    @property
+    def train_adj_matrix(self):
+        return self.corpus.train_adj_matrix
+
+class TrainLoader():
+    def __init__(self, corpus):
+        self.corpus = corpus
+
+    def __len__(self):
+        args = self.corpus.args
+        train_indices = self.corpus.corpus.train_indices
+        # elaborate ceiling division lol
+        if len(train_indices) % args.batch_size_gat == 0:
+            num_iters_per_epoch = len(
+                train_indices) // args.batch_size_gat
+        else:
+            num_iters_per_epoch = (
+                len(train_indices) // args.batch_size_gat) + 1
+        # normal ceiling division
+        equivalent_num_iters_per_epoch = math.ceil(len(train_indices) / args.batch_size_gat)
+        return num_iters_per_epoch
+
+    def __iter__(self):
+        shuffle = random.shuffle(self.corpus.corpus.train_triples)
+        for iters in range(len(self)):
+            indices, values = self.corpus.corpus.get_iteration_batch(iters)
+            yield (torch.LongTensor(indices), torch.FloatTensor(values))
+
+def get_loaders(corpus):
+    return TrainLoader(corpus), None, None
+
+# end my additions ------------------------------------------------------------------
 
 
 class Corpus:
@@ -412,7 +494,6 @@ class Corpus:
                 new_x_batch_tail = np.insert(
                     new_x_batch_tail, 0, batch_indices[i], axis=0)
 
-                import math
                 # Have to do this, because it doesn't fit in memory
 
                 if 'WN' in args.data:
