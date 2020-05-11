@@ -14,7 +14,24 @@ CUDA = torch.cuda.is_available()  # checking cuda availability
 
 # begin my additions (some copied from other files) -------------------------------
 
-class GAT(ptu.CudaCompatibleMixin, ptu.HasDataloaderMixin, ptu.Trainable):
+class ConvOrGAT(ptu.CudaCompatibleMixin, ptu.HasDataloaderMixin, ptu.Trainable):
+
+    def adapt_args(self, args):
+        """
+        adapts arguments to select either conv args or gat args, depending on self.is_gat
+        """
+        new = {}
+        for field, value in args.__dict__.items():
+            last = field.split('_')[-1].lower()
+            rest = '_'.join(field.split('_')[:-1])
+            to_use = 'gat' if self.is_gat else 'conv'
+            if last not in ['gat', 'conv']:
+                new[field] = value
+            elif last == to_use:
+                new[rest] = value
+            else:
+                pass
+        return Namespace(**new)
 
     def get_optim_state(self):
         return {'optim': self.optim.state_dict(),
@@ -24,9 +41,11 @@ class GAT(ptu.CudaCompatibleMixin, ptu.HasDataloaderMixin, ptu.Trainable):
         self.optim.load_state_dict(state['optim'])
         self.lr_scheduler.load_state_dict(state['lr_scheduler'])
 
-    def init_optim(self, *, lr, weight_decay_conv):
+    def init_optim(self):
+        # weight_decay = self.args.weight_decay_gat if self.is_gat else self.args.weight_decay_conv
         self.optim = torch.optim.Adam(
-            self.parameters(), lr=lr, weight_decay=weight_decay_conv)
+            self.parameters(), lr=self.args.lr,
+            weight_decay=self.args.weight_decay)
         self.lr_scheduler = torch.optim.lr_scheduler.StepLR(
             self.optim, step_size=25, gamma=0.5, last_epoch=-1)
 
@@ -34,26 +53,40 @@ class GAT(ptu.CudaCompatibleMixin, ptu.HasDataloaderMixin, ptu.Trainable):
         self.lr_scheduler.step()
         super().end_epoch()
 
-    def init_nn(self, **args):
+    def gat_or_conv_init(self, args):
 
-        args = Namespace(**args)
+        args = self.adapt_args(args)
         self.args = args
-        self.corpus = CorpusDataset(args)
+        self.corpus = CorpusDataset(self.args)
         self.current_batch_2hop_indices = self.corpus.get_current_batch_2hop_indices()
+
+        train_loader, valid_loader, test_loader = get_loaders(self.corpus)
+        self.set_dataloaders(train_loader, valid_loader, test_loader)
+
+    def post_init(self):
+
+        if torch.cuda.is_available():
+            self.to_cuda()
+
+
+class GAT(ConvOrGAT):
+    is_gat = True
+
+    def init_nn(self, args):
+
+        # args = Namespace(**args)
+        self.gat_or_conv_init(args)
 
         init_ent_emb, init_rel_emb = self.corpus.get_pretrained_embs()
         self.spgat = SpKBGATModified(
             initial_entity_emb=init_ent_emb,
             initial_relation_emb=init_rel_emb,
-            entity_out_dim=args.entity_out_dim,
-            relation_out_dim=args.entity_out_dim,
-            drop_GAT=args.drop_GAT,
-            alpha=args.alpha,
-            nheads_GAT=args.nheads_GAT,
+            entity_out_dim=self.args.entity_out_dim,
+            relation_out_dim=self.args.entity_out_dim,
+            drop_GAT=self.args.drop,
+            alpha=self.args.alpha,
+            nheads_GAT=self.args.nheads,
         )
-
-        train_loader, valid_loader, test_loader = get_loaders(self.corpus)
-        self.set_dataloaders(train_loader, valid_loader, test_loader)
 
     def loss(self, train_indices, train_values):
 
@@ -66,9 +99,9 @@ class GAT(ptu.CudaCompatibleMixin, ptu.HasDataloaderMixin, ptu.Trainable):
     def loss_from_embeddings(self, train_indices, entity_embed, relation_embed):
 
         len_pos_triples = int(
-            train_indices.shape[0] / (int(self.args.valid_invalid_ratio_gat) + 1))
+            train_indices.shape[0] / (int(self.args.valid_invalid_ratio) + 1))
 
-        pos_triples = train_indices[:len_pos_triples].repeat(int(self.args.valid_invalid_ratio_gat), 1)
+        pos_triples = train_indices[:len_pos_triples].repeat(int(self.args.valid_invalid_ratio), 1)
         neg_triples = train_indices[len_pos_triples:]
 
         def get_norm(triples):
@@ -80,11 +113,44 @@ class GAT(ptu.CudaCompatibleMixin, ptu.HasDataloaderMixin, ptu.Trainable):
         pos_norm = get_norm(pos_triples)
         neg_norm = get_norm(neg_triples)
 
-        y = torch.ones(int(self.args.valid_invalid_ratio_gat) * len_pos_triples).cuda()
+        y = torch.ones(int(self.args.valid_invalid_ratio) * len_pos_triples).cuda()
 
         loss_func = nn.MarginRankingLoss(margin=self.args.margin)
         loss = loss_func(pos_norm, neg_norm, y)
         return loss
+
+    @property
+    def final_entity_embeddings(self):
+        return self.spgat.final_entity_embeddings
+
+    @property
+    def final_relation_embeddings(self):
+        return self.spgat.final_relation_embeddings
+
+class ConvDecoder(ConvOrGAT):
+    is_gat = False
+
+    def init_nn(self, args, entity_embeddings, relation_embeddings):
+
+        self.gat_or_conv_init(args)
+        self.conv = SpKBGATConvOnly(
+            final_entity_emb=entity_embeddings,
+            final_relation_emb=relation_embeddings,
+            entity_out_dim=self.args.entity_out_dim,
+            relation_out_dim=self.args.entity_out_dim,
+            drop_conv=self.args.drop,
+            alpha_conv=self.args.alpha,
+            nheads_GAT=self.args.nheads,
+            conv_out_channels=self.args.out_channels)
+
+    def loss(self, train_indices, train_values):
+
+        preds = self.conv(
+            self.corpus, self.corpus.train_adj_matrix, train_indices)
+        loss = nn.SoftMarginLoss()(preds.view(-1), train_values.view(-1))
+        self.log = {'loss': loss.item()}
+        return loss
+
 
 # end my additions ------------------------------------------------------------------
 
@@ -237,43 +303,39 @@ class SpKBGATModified(nn.Module):
 
 
 class SpKBGATConvOnly(nn.Module):
-    def __init__(self, initial_entity_emb, initial_relation_emb, entity_out_dim, relation_out_dim,
-                 drop_GAT, drop_conv, alpha, alpha_conv, nheads_GAT, conv_out_channels):
-        '''Sparse version of KBGAT
+    def __init__(self, final_entity_emb, final_relation_emb, entity_out_dim, relation_out_dim,
+                 drop_conv, alpha_conv, nheads_GAT, conv_out_channels):  # NOTE removed alpha as it doesn't seem to get used
+        '''
+        Sparse version of KBGAT
         entity_in_dim -> Entity Input Embedding dimensions
         entity_out_dim  -> Entity Output Embedding dimensions, passed as a list
         num_relation -> number of unique relations
         relation_dim -> Relation Embedding dimensions
         num_nodes -> number of nodes in the Graph
-        nheads_GAT -> Used for Multihead attention, passed as a list '''
+        nheads_GAT -> Used for Multihead attention, passed as a list
+        '''
 
         super().__init__()
 
-        self.num_nodes = initial_entity_emb.shape[0]
-        self.entity_in_dim = initial_entity_emb.shape[1]
-        self.entity_out_dim_1 = entity_out_dim[0]
-        self.nheads_GAT_1 = nheads_GAT[0]
-        self.entity_out_dim_2 = entity_out_dim[1]
-        self.nheads_GAT_2 = nheads_GAT[1]
+        self.num_nodes = final_entity_emb.shape[0]
+        emb_dim = entity_out_dim[0] * nheads_GAT[0]
 
         # Properties of Relations
-        self.num_relation = initial_relation_emb.shape[0]
-        self.relation_dim = initial_relation_emb.shape[1]
+        self.num_relation = final_relation_emb.shape[0]
+        self.relation_dim = final_relation_emb.shape[1]
         self.relation_out_dim_1 = relation_out_dim[0]
 
-        self.drop_GAT = drop_GAT
         self.drop_conv = drop_conv
-        self.alpha = alpha      # For leaky relu
+        # self.alpha = alpha      # For leaky relu
         self.alpha_conv = alpha_conv
         self.conv_out_channels = conv_out_channels
 
-        self.final_entity_embeddings = nn.Parameter(
-            torch.randn(self.num_nodes, self.entity_out_dim_1 * self.nheads_GAT_1))
+        assert final_entity_emb.shape == (self.num_nodes, emb_dim,)
+        assert final_relation_emb.shape == (self.num_relation, emb_dim,)
+        self.final_entity_embeddings = nn.Parameter(final_entity_emb)
+        self.final_relation_embeddings = nn.Parameter(final_relation_emb)  # should not be learnable more ? I think it currently is
 
-        self.final_relation_embeddings = nn.Parameter(
-            torch.randn(self.num_relation, self.entity_out_dim_1 * self.nheads_GAT_1))
-
-        self.convKB = ConvKB(self.entity_out_dim_1 * self.nheads_GAT_1, 3, 1,
+        self.convKB = ConvKB(emb_dim, 3, 1,
                              self.conv_out_channels, self.drop_conv, self.alpha_conv)
 
     def forward(self, Corpus_, adj, batch_inputs):
@@ -283,6 +345,7 @@ class SpKBGATConvOnly(nn.Module):
         return out_conv
 
     def batch_test(self, batch_inputs):
+        print(batch_inputs.shape)
         conv_input = torch.cat((self.final_entity_embeddings[batch_inputs[:, 0], :].unsqueeze(1), self.final_relation_embeddings[
             batch_inputs[:, 1]].unsqueeze(1), self.final_entity_embeddings[batch_inputs[:, 2], :].unsqueeze(1)), dim=1)
         out_conv = self.convKB(conv_input)

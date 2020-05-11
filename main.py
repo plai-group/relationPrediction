@@ -59,12 +59,12 @@ def parse_args():
                       default=2, help="Ratio of valid to invalid triples for GAT training")
     args.add_argument("-drop_GAT", "--drop_GAT", type=float,
                       default=0.3, help="Dropout probability for SpGAT layer")
-    args.add_argument("-alpha", "--alpha", type=float,
+    args.add_argument("-alpha_gat", "--alpha_gat", type=float,  # NOTE renamed from alpha
                       default=0.2, help="LeakyRelu alphs for SpGAT layer")
     args.add_argument("-out_dim", "--entity_out_dim", type=int, nargs='+',
                       default=[100, 200], help="Entity output embedding dimensions")
-    args.add_argument("-h_gat", "--nheads_GAT", type=int, nargs='+',
-                      default=[2, 2], help="Multihead attention SpGAT")
+    args.add_argument("-heads", "--nheads", type=int, nargs='+',   # renamed from nheads_GAT
+                      default=[2, 2], help="Multihead attention SpGAT")  # no h_conv
     args.add_argument("-margin", "--margin", type=float,
                       default=5, help="Margin used in hinge loss")
 
@@ -174,7 +174,7 @@ def train_gat(args):
     print(
         "\nModel type -> GAT layer with {} heads used , Initital Embeddings training".format(args.nheads_GAT[0]))
     model_gat = SpKBGATModified(entity_embeddings, relation_embeddings, args.entity_out_dim,
-                                args.entity_out_dim, args.drop_GAT, args.alpha, args.nheads_GAT)
+                                args.entity_out_dim, args.drop_GAT, args.alpha_gat, args.nheads_GAT)
 
     if CUDA:
         model_gat.cuda()
@@ -266,10 +266,10 @@ def train_conv(args):
 
     print("Defining model")
     model_gat = SpKBGATModified(entity_embeddings, relation_embeddings, args.entity_out_dim, args.entity_out_dim,
-                                args.drop_GAT, args.alpha, args.nheads_GAT)
+                                args.drop_GAT, args.alpha_gat, args.nheads_GAT)
     print("Only Conv model trained")
     model_conv = SpKBGATConvOnly(entity_embeddings, relation_embeddings, args.entity_out_dim, args.entity_out_dim,
-                                 args.drop_GAT, args.drop_conv, args.alpha, args.alpha_conv,
+                                 args.drop_GAT, args.drop_conv, args.alpha_conv,
                                  args.nheads_GAT, args.out_channels)
 
     if CUDA:
@@ -352,8 +352,9 @@ def train_conv(args):
 
 
 def evaluate_conv(args, unique_entities):
-    model_conv = SpKBGATConvOnly(entity_embeddings, relation_embeddings, args.entity_out_dim, args.entity_out_dim,
-                                 args.drop_GAT, args.drop_conv, args.alpha, args.alpha_conv,
+    model_conv = SpKBGATConvOnly(entity_embeddings, relation_embeddings,
+                                 args.entity_out_dim, args.entity_out_dim,
+                                 args.drop_GAT, args.drop_conv, args.alpha_conv,
                                  args.nheads_GAT, args.out_channels)
     model_conv.load_state_dict(torch.load(
         '{0}conv/trained_{1}.pth'.format(args.output_folder, args.epochs_conv - 1)), strict=False)

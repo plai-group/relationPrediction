@@ -1,19 +1,33 @@
 import torch
 
-from models import GAT
+from models import GAT, ConvDecoder
 from main import parse_args
 
 
 args = parse_args()
 gat = GAT(
     seed=1,
-    nn_args=args.__dict__,
-    optim_args=dict(
-        lr=args.lr,
-        weight_decay_conv=args.weight_decay_conv
-    ),
+    nn_args=dict(args=args),
+    optim_args=dict(),
 )
-if torch.cuda.is_available():
-    gat.to_cuda()
+gat.train_n_epochs(gat.args.epochs)
 
-gat.train_n_epochs(12)
+conv = ConvDecoder(
+    seed=1,
+    nn_args=dict(
+        args=args,
+        entity_embeddings=gat.final_entity_embeddings,
+        relation_embeddings=gat.final_relation_embeddings,
+    ),
+    optim_args=dict(),
+)
+conv.train_n_epochs(conv.args.epochs)
+
+# fuck it
+conv.eval()
+with torch.no_grad():
+    corpus = conv.train_loader.corpus.corpus
+    print(corpus.batch_size)
+    corpus.get_validation_pred(
+        args, conv.conv, corpus.unique_entities_train
+    )

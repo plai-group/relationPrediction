@@ -25,7 +25,7 @@ class CorpusDataset(torch.utils.data.Dataset):
 
         self.corpus = Corpus(args, train_data, validation_data, test_data,
                              entity2id, relation2id, headTailSelector,
-                             args.batch_size_gat, args.valid_invalid_ratio_gat,
+                             args.batch_size, args.valid_invalid_ratio,
                              unique_entities_train, args.get_2hop)
 
     def get_pretrained_embs(self):
@@ -66,14 +66,14 @@ class TrainLoader():
         args = self.corpus.args
         train_indices = self.corpus.corpus.train_indices
         # elaborate ceiling division lol
-        if len(train_indices) % args.batch_size_gat == 0:
+        if len(train_indices) % args.batch_size == 0:
             num_iters_per_epoch = len(
-                train_indices) // args.batch_size_gat
+                train_indices) // args.batch_size
         else:
             num_iters_per_epoch = (
-                len(train_indices) // args.batch_size_gat) + 1
+                len(train_indices) // args.batch_size) + 1
         # normal ceiling division
-        equivalent_num_iters_per_epoch = math.ceil(len(train_indices) / args.batch_size_gat)
+        equivalent_num_iters_per_epoch = math.ceil(len(train_indices) / args.batch_size)
         return num_iters_per_epoch
 
     def __iter__(self):
