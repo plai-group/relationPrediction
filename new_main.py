@@ -3,7 +3,6 @@ import torch
 from models import GAT, ConvDecoder
 from main import parse_args
 
-
 args = parse_args()
 gat = GAT(
     seed=1,
@@ -21,6 +20,7 @@ conv = ConvDecoder(
     ),
     optim_args=dict(),
 )
+conv.set_save_valid_conditions('save', 'every', 10, 'epochs')
 conv.train_n_epochs(conv.args.epochs)
 
 # fuck it
