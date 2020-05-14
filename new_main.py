@@ -20,6 +20,7 @@ conv = ConvDecoder(
         relation_embeddings=gat.final_relation_embeddings,
     ),
     optim_args=dict(),
+    extra_things_to_use_in_hash=gat.get_path(gat.epochs),
 )
 conv.train_n_epochs(conv.args.epochs)
 

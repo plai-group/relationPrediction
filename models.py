@@ -101,10 +101,8 @@ class GAT(ConvOrGAT):
 
         len_pos_triples = int(
             train_indices.shape[0] / (int(self.args.valid_invalid_ratio) + 1))
-
         pos_triples = train_indices[:len_pos_triples].repeat(int(self.args.valid_invalid_ratio), 1)
         neg_triples = train_indices[len_pos_triples:]
-
         def get_norm(triples):
             source_embeds = entity_embed[triples[:, 0]]
             relation_embeds = relation_embed[triples[:, 1]]
@@ -113,9 +111,7 @@ class GAT(ConvOrGAT):
             return torch.norm(x, p=1, dim=1)
         pos_norm = get_norm(pos_triples)
         neg_norm = get_norm(neg_triples)
-
         y = torch.ones(int(self.args.valid_invalid_ratio) * len_pos_triples).cuda()
-
         loss_func = nn.MarginRankingLoss(margin=self.args.margin)
         loss = loss_func(pos_norm, neg_norm, y)
         return loss
@@ -305,7 +301,7 @@ class SpKBGATModified(nn.Module):
 
 class SpKBGATConvOnly(nn.Module):
     def __init__(self, final_entity_emb, final_relation_emb, entity_out_dim, relation_out_dim,
-                 drop_conv, alpha_conv, nheads_GAT, conv_out_channels):  # NOTE removed alpha as it doesn't seem to get used
+                 drop_conv, alpha_conv, nheads_GAT, conv_out_channels, variational=True, temperature=0.01):  # NOTE removed alpha as it doesn't seem to get used
         '''
         Sparse version of KBGAT
         entity_in_dim -> Entity Input Embedding dimensions
@@ -331,17 +327,26 @@ class SpKBGATConvOnly(nn.Module):
         self.alpha_conv = alpha_conv
         self.conv_out_channels = conv_out_channels
 
+        self.variational = ...
+
         assert final_entity_emb.shape == (self.num_nodes, emb_dim,)
         assert final_relation_emb.shape == (self.num_relation, emb_dim,)
-        self.final_entity_embeddings = nn.Parameter(final_entity_emb)
-        self.final_relation_embeddings = nn.Parameter(final_relation_emb)  # should not be learnable more ? I think it currently is
+        self.final_entity_embeddings_mean = nn.Parameter(final_entity_emb)
+        self.final_relation_embeddings_mean = nn.Parameter(final_relation_emb)  # this is learnable more. is this desired?
+        if self.variational:
+            self.entity_logstddev = nn.Parameter(final_entity_emb*0-2)
+            self.relation_logstddev = nn.Parameter(final_relation_emb*0-2)
 
         self.convKB = ConvKB(emb_dim, 3, 1,
                              self.conv_out_channels, self.drop_conv, self.alpha_conv)
 
     def forward(self, Corpus_, adj, batch_inputs):
-        conv_input = torch.cat((self.final_entity_embeddings[batch_inputs[:, 0], :].unsqueeze(1), self.final_relation_embeddings[
-            batch_inputs[:, 1]].unsqueeze(1), self.final_entity_embeddings[batch_inputs[:, 2], :].unsqueeze(1)), dim=1)
+        entity_embeddings = self.final_entity_embeddings_mean
+        relation_embeddings = self.final_relation_embeddings_mean
+        if self.variational:
+
+        conv_input = torch.cat((entity_embeddings[batch_inputs[:, 0], :].unsqueeze(1), relation_embeddings[
+            batch_inputs[:, 1]].unsqueeze(1), entity_embeddings[batch_inputs[:, 2], :].unsqueeze(1)), dim=1)
         out_conv = self.convKB(conv_input)
         return out_conv
 
