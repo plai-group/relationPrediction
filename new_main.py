@@ -9,7 +9,7 @@ gat = GAT(
     nn_args=dict(args=GAT.adapt_args(True, args)),
     optim_args=dict(),
 )
-gat.set_save_valid_conditions('save', 'every', 2, 'epochs')
+gat.set_save_valid_conditions('save', 'every', 600, 'epochs')
 gat.train_n_epochs(args.epochs_gat)
 gat.load_checkpoint(max_epochs=args.epochs_gat)  # line should be unnecessary once using latest ptutils
 
