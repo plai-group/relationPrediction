@@ -16,7 +16,8 @@ CUDA = torch.cuda.is_available()  # checking cuda availability
 
 class ConvOrGAT(ptu.CudaCompatibleMixin, ptu.HasDataloaderMixin, ptu.Trainable):
 
-    def adapt_args(self, args):
+    @staticmethod
+    def adapt_args(is_gat, args):
         """
         adapts arguments to select either conv args or gat args, depending on self.is_gat
         """
@@ -24,13 +25,14 @@ class ConvOrGAT(ptu.CudaCompatibleMixin, ptu.HasDataloaderMixin, ptu.Trainable):
         for field, value in args.__dict__.items():
             last = field.split('_')[-1].lower()
             rest = '_'.join(field.split('_')[:-1])
-            to_use = 'gat' if self.is_gat else 'conv'
+            to_use = 'gat' if is_gat else 'conv'
             if last not in ['gat', 'conv']:
                 new[field] = value
             elif last == to_use:
                 new[rest] = value
             else:
                 pass
+        new.pop('epochs')  # artifact doesn't use this
         return Namespace(**new)
 
     def get_optim_state(self):
@@ -55,7 +57,6 @@ class ConvOrGAT(ptu.CudaCompatibleMixin, ptu.HasDataloaderMixin, ptu.Trainable):
 
     def gat_or_conv_init(self, args):
 
-        args = self.adapt_args(args)
         self.args = args
         self.corpus = CorpusDataset(self.args)
         self.current_batch_2hop_indices = self.corpus.get_current_batch_2hop_indices()
