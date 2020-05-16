@@ -394,8 +394,16 @@ class SpKBGATConvOnly(nn.Module):
         return out_conv
 
     def batch_test(self, batch_inputs):
-        # print(batch_inputs.shape)   # TODO test for variational
-        conv_input = torch.cat((self.final_entity_embeddings_mean[batch_inputs[:, 0], :].unsqueeze(1), self.final_relation_embeddings_mean[
-            batch_inputs[:, 1]].unsqueeze(1), self.final_entity_embeddings_mean[batch_inputs[:, 2], :].unsqueeze(1)), dim=1)
-        out_conv = self.convKB(conv_input)
-        return out_conv
+
+        def get_probs():
+            entity_embeddings, relation_embeddings = self.get_sampled_embeddings()
+            conv_input = torch.cat((entity_embeddings[batch_inputs[:, 0], :].unsqueeze(1), relation_embeddings[
+                batch_inputs[:, 1]].unsqueeze(1), entity_embeddings[batch_inputs[:, 2], :].unsqueeze(1)), dim=1)
+            return torch.sigmoid(self.convKB(conv_input))
+
+        if self.variational:
+            if not hasattr(self, 'n_samples'):
+                raise Exception('Must set attribute n_samples before testing.')
+            return sum(get_probs() for _ in range(self.n_samples)) / self.n_samples
+        else:
+            return get_probs()

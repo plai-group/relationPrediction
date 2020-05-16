@@ -88,7 +88,6 @@ def parse_args():
     args.add_argument("-sigma_p_conv", type=float,
                       help="Prior std dev. for embeddings.")
 
-
     args = args.parse_args()
     return args
 

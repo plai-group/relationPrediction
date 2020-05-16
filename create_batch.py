@@ -500,14 +500,15 @@ class Corpus:
                     num_triples_each_shot = int(
                         math.ceil(new_x_batch_head.shape[0] / 4))
 
+                    device = next(model.parameters()).device
                     scores1_head = model.batch_test(torch.LongTensor(
-                        new_x_batch_head[:num_triples_each_shot, :]).cuda())
+                        new_x_batch_head[:num_triples_each_shot, :]).to(device))
                     scores2_head = model.batch_test(torch.LongTensor(
-                        new_x_batch_head[num_triples_each_shot: 2 * num_triples_each_shot, :]).cuda())
+                        new_x_batch_head[num_triples_each_shot: 2 * num_triples_each_shot, :]).to(device))
                     scores3_head = model.batch_test(torch.LongTensor(
-                        new_x_batch_head[2 * num_triples_each_shot: 3 * num_triples_each_shot, :]).cuda())
+                        new_x_batch_head[2 * num_triples_each_shot: 3 * num_triples_each_shot, :]).to(device))
                     scores4_head = model.batch_test(torch.LongTensor(
-                        new_x_batch_head[3 * num_triples_each_shot: 4 * num_triples_each_shot, :]).cuda())
+                        new_x_batch_head[3 * num_triples_each_shot: 4 * num_triples_each_shot, :]).to(device))
                     # scores5_head = model.batch_test(torch.LongTensor(
                     #     new_x_batch_head[4 * num_triples_each_shot: 5 * num_triples_each_shot, :]).cuda())
                     # scores6_head = model.batch_test(torch.LongTensor(
@@ -542,13 +543,13 @@ class Corpus:
                         math.ceil(new_x_batch_tail.shape[0] / 4))
 
                     scores1_tail = model.batch_test(torch.LongTensor(
-                        new_x_batch_tail[:num_triples_each_shot, :]).cuda())
+                        new_x_batch_tail[:num_triples_each_shot, :]).to(device))
                     scores2_tail = model.batch_test(torch.LongTensor(
-                        new_x_batch_tail[num_triples_each_shot: 2 * num_triples_each_shot, :]).cuda())
+                        new_x_batch_tail[num_triples_each_shot: 2 * num_triples_each_shot, :]).to(device))
                     scores3_tail = model.batch_test(torch.LongTensor(
-                        new_x_batch_tail[2 * num_triples_each_shot: 3 * num_triples_each_shot, :]).cuda())
+                        new_x_batch_tail[2 * num_triples_each_shot: 3 * num_triples_each_shot, :]).to(device))
                     scores4_tail = model.batch_test(torch.LongTensor(
-                        new_x_batch_tail[3 * num_triples_each_shot: 4 * num_triples_each_shot, :]).cuda())
+                        new_x_batch_tail[3 * num_triples_each_shot: 4 * num_triples_each_shot, :]).to(device))
                     # scores5_tail = model.batch_test(torch.LongTensor(
                     #     new_x_batch_tail[4 * num_triples_each_shot: 5 * num_triples_each_shot, :]).cuda())
                     # scores6_tail = model.batch_test(torch.LongTensor(

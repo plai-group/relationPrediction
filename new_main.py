@@ -27,6 +27,7 @@ conv.set_save_valid_conditions('save', 'every', 10, 'epochs')
 conv.train_n_epochs(args.epochs_conv)
 
 # fuck it
+conv.conv.n_samples = 5
 conv.eval()
 with torch.no_grad():
     corpus = conv.train_loader.corpus.corpus
