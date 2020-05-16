@@ -84,6 +84,8 @@ def parse_args():
                       help="Whether to do VI over embeddings.")
     args.add_argument("-temperature_conv", type=float,
                       help="Temperature for fitting variational distribution.")
+    args.add_argument("-sigma_p_conv", type=float,
+                      help="Prior std dev. for embeddings.")
 
 
     args = args.parse_args()

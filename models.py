@@ -143,6 +143,7 @@ class ConvDecoder(ConvOrGAT):
             conv_out_channels=self.args.out_channels,
             variational=self.args.variational,
             temperature=self.args.temperature,
+            sigma_p=self.args.sigma_p,
         )
 
     def classifier_loss(self, train_indices, train_values):
@@ -331,7 +332,8 @@ class SpKBGATModified(nn.Module):
 
 class SpKBGATConvOnly(nn.Module):
     def __init__(self, final_entity_emb, final_relation_emb, entity_out_dim, relation_out_dim,
-                 drop_conv, alpha_conv, nheads_GAT, conv_out_channels, variational=True, temperature=0.01):  # NOTE removed alpha as it doesn't seem to get used
+                 drop_conv, alpha_conv, nheads_GAT, conv_out_channels, variational,
+                 temperature, sigma_p=sigma_p):  # NOTE removed alpha as it doesn't seem to get used
         '''
         Sparse version of KBGAT
         entity_in_dim -> Entity Input Embedding dimensions
