@@ -46,11 +46,12 @@ class ConvOrGAT(ptu.CudaCompatibleMixin, ptu.HasDataloaderMixin, ptu.Trainable):
 
     def init_optim(self):
         # weight_decay = self.args.weight_decay_gat if self.is_gat else self.args.weight_decay_conv
+        step_size = 500 if self.is_gat else 25
         self.optim = torch.optim.Adam(
             self.parameters(), lr=self.args.lr,
             weight_decay=self.args.weight_decay)
         self.lr_scheduler = torch.optim.lr_scheduler.StepLR(
-            self.optim, step_size=25, gamma=0.5, last_epoch=-1)
+            self.optim, step_size=step_size, gamma=0.5, last_epoch=-1)
 
     def end_epoch(self):
         self.lr_scheduler.step()
@@ -333,7 +334,7 @@ class SpKBGATModified(nn.Module):
 class SpKBGATConvOnly(nn.Module):
     def __init__(self, final_entity_emb, final_relation_emb, entity_out_dim, relation_out_dim,
                  drop_conv, alpha_conv, nheads_GAT, conv_out_channels, variational,
-                 temperature, sigma_p=sigma_p):  # NOTE removed alpha as it doesn't seem to get used
+                 temperature, sigma_p):  # NOTE removed alpha as it doesn't seem to get used
         '''
         Sparse version of KBGAT
         entity_in_dim -> Entity Input Embedding dimensions
@@ -393,8 +394,8 @@ class SpKBGATConvOnly(nn.Module):
         return out_conv
 
     def batch_test(self, batch_inputs):
-        # print(batch_inputs.shape)
-        conv_input = torch.cat((self.final_entity_embeddings[batch_inputs[:, 0], :].unsqueeze(1), self.final_relation_embeddings[
-            batch_inputs[:, 1]].unsqueeze(1), self.final_entity_embeddings[batch_inputs[:, 2], :].unsqueeze(1)), dim=1)
+        # print(batch_inputs.shape)   # TODO test for variational
+        conv_input = torch.cat((self.final_entity_embeddings_mean[batch_inputs[:, 0], :].unsqueeze(1), self.final_relation_embeddings_mean[
+            batch_inputs[:, 1]].unsqueeze(1), self.final_entity_embeddings_mean[batch_inputs[:, 2], :].unsqueeze(1)), dim=1)
         out_conv = self.convKB(conv_input)
         return out_conv

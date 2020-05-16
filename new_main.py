@@ -5,7 +5,7 @@ from main import parse_args
 
 args = parse_args()
 gat = GAT(
-    seed=1,
+    seed=args.seed,
     nn_args=dict(args=GAT.adapt_args(True, args)),
     optim_args=dict(),
 )
@@ -14,7 +14,7 @@ gat.train_n_epochs(args.epochs_gat)
 gat.load_checkpoint(max_epochs=args.epochs_gat)  # line should be unnecessary once using latest ptutils
 
 conv = ConvDecoder(
-    seed=1,
+    seed=args.seed,
     nn_args=dict(
         args=ConvDecoder.adapt_args(False, args),
         entity_embeddings=gat.final_entity_embeddings,

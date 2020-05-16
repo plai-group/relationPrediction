@@ -31,6 +31,7 @@ def str2bool(s):
 def parse_args():
     args = argparse.ArgumentParser()
     # network arguments
+    args.add_argument('-seed', type=int, default=1)
     args.add_argument("-data", "--data",
                       default="./data/WN18RR/", help="data directory")
     args.add_argument("-e_g", "--epochs_gat", type=int,
