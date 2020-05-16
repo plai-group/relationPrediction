@@ -3,14 +3,15 @@ import torch
 from models import GAT, ConvDecoder
 from main import parse_args
 
-
 args = parse_args()
 gat = GAT(
     seed=1,
     nn_args=dict(args=GAT.adapt_args(True, args)),
     optim_args=dict(),
 )
-gat.train_n_epochs(gat.args.epochs)
+gat.set_save_valid_conditions('save', 'every', 600, 'epochs')
+gat.train_n_epochs(args.epochs_gat)
+gat.load_checkpoint(max_epochs=args.epochs_gat)  # line should be unnecessary once using latest ptutils
 
 conv = ConvDecoder(
     seed=1,
@@ -22,7 +23,8 @@ conv = ConvDecoder(
     optim_args=dict(),
     extra_things_to_use_in_hash=gat.get_path(gat.epochs),
 )
-conv.train_n_epochs(conv.args.epochs)
+conv.set_save_valid_conditions('save', 'every', 10, 'epochs')
+conv.train_n_epochs(args.epochs_conv)
 
 # fuck it
 conv.eval()

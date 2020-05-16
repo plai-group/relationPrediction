@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
 import time
+import math
 from layers import SpGraphAttentionLayer, ConvKB
 from create_batch import CorpusDataset, get_loaders
 from argparse import Namespace
@@ -95,6 +96,7 @@ class GAT(ConvOrGAT):
             self.corpus, self.corpus.train_adj_matrix, train_indices, self.current_batch_2hop_indices)
         loss = self.loss_from_embeddings(train_indices, entity_embed, relation_embed)
         self.log = {'loss': loss.item()}
+        self.tqdm_text = str(self.log)
         return loss
 
     def loss_from_embeddings(self, train_indices, entity_embed, relation_embed):
@@ -111,7 +113,7 @@ class GAT(ConvOrGAT):
             return torch.norm(x, p=1, dim=1)
         pos_norm = get_norm(pos_triples)
         neg_norm = get_norm(neg_triples)
-        y = torch.ones(int(self.args.valid_invalid_ratio) * len_pos_triples).cuda()
+        y = torch.ones(int(self.args.valid_invalid_ratio) * len_pos_triples).to(self.device)
         loss_func = nn.MarginRankingLoss(margin=self.args.margin)
         loss = loss_func(pos_norm, neg_norm, y)
         return loss
@@ -138,15 +140,43 @@ class ConvDecoder(ConvOrGAT):
             drop_conv=self.args.drop,
             alpha_conv=self.args.alpha,
             nheads_GAT=self.args.nheads,
-            conv_out_channels=self.args.out_channels)
+            conv_out_channels=self.args.out_channels,
+            variational=self.args.variational,
+            temperature=self.args.temperature,
+        )
 
-    def loss(self, train_indices, train_values):
+    def classifier_loss(self, train_indices, train_values):
 
         preds = self.conv(
             self.corpus, self.corpus.train_adj_matrix, train_indices)
-        loss = nn.SoftMarginLoss()(preds.view(-1), train_values.view(-1))
+        return nn.SoftMarginLoss()(preds.view(-1), train_values.view(-1))
+
+    def prior_logpdf(self):
+        entity_embeddings, relation_embeddings = self.get_sampled_embeddings()
+        entity_sqr_distance = torch.norm(self.entity_embeddings_from_gat - entity_embeddings, 2)**2
+        relation_sqr_distance = torch.norm(self.relation_embeddings_from_gat - relation_embeddings, 2)**2
+        sqr_distance = entity_sqr_distance + relation_sqr_distance
+        print('distance for prior', sqr_distance)
+        prior_logpdf = 0.5 * sqr_distance / self.sigma_p**2
+
+    def temp_entropy_q(self):
+
+        std = torch.cat(self.entity_logstddev.exp(), self.relation_logstddev.exp())
+        entropy_q = 0.5 * torch.log(2*math.pi*math.e*std**2).sum()
+        return entropy_q * self.conv.temperature
+
+    def loss(self, train_indices, train_values):
+
+        lik_logpdf = self.classifier_loss(train_indices, train_values)
+        if self.conv.variational:
+            elbo_temp = self.prior_logpdf() + lik_logpdf - self.temp_entropy_q()
+            loss = -elbo_temp
+        else:
+            loss = lik_logpdf
         self.log = {'loss': loss.item()}
+        self.tqdm_text = str(self.log)
         return loss
+
 
 
 # end my additions ------------------------------------------------------------------
@@ -283,8 +313,8 @@ class SpKBGATModified(nn.Module):
             Corpus_, batch_inputs, self.entity_embeddings, self.relation_embeddings,
             edge_list, edge_type, edge_embed, edge_list_nhop, edge_type_nhop)
 
-        mask_indices = torch.unique(batch_inputs[:, 2]).cuda()
-        mask = torch.zeros(self.entity_embeddings.shape[0]).cuda()
+        mask_indices = torch.unique(batch_inputs[:, 2]).to(edge_list.device)
+        mask = torch.zeros(self.entity_embeddings.shape[0]).to(edge_list.device)
         mask[mask_indices] = 1.0
 
         entities_upgraded = self.entity_embeddings.mm(self.W_entities)
@@ -327,12 +357,17 @@ class SpKBGATConvOnly(nn.Module):
         self.alpha_conv = alpha_conv
         self.conv_out_channels = conv_out_channels
 
-        self.variational = ...
+        self.variational = variational
+        self.sigma_p = sigma_p
 
         assert final_entity_emb.shape == (self.num_nodes, emb_dim,)
         assert final_relation_emb.shape == (self.num_relation, emb_dim,)
-        self.final_entity_embeddings_mean = nn.Parameter(final_entity_emb)
-        self.final_relation_embeddings_mean = nn.Parameter(final_relation_emb)  # this is learnable more. is this desired?
+
+        self.entity_embeddings_from_gat = final_entity_emb.clone()  # requires we always load GAT before initialising this
+        self.relation_embeddings_from_gat = final_relation_emb.clone()
+
+        self.final_entity_embeddings_mean = nn.Parameter(final_entity_emb.clone())
+        self.final_relation_embeddings_mean = nn.Parameter(final_relation_emb.clone())  # this is learnable more. is this desired?
         if self.variational:
             self.entity_logstddev = nn.Parameter(final_entity_emb*0-2)
             self.relation_logstddev = nn.Parameter(final_relation_emb*0-2)
@@ -340,18 +375,23 @@ class SpKBGATConvOnly(nn.Module):
         self.convKB = ConvKB(emb_dim, 3, 1,
                              self.conv_out_channels, self.drop_conv, self.alpha_conv)
 
-    def forward(self, Corpus_, adj, batch_inputs):
+    def get_sampled_embeddings(self):
         entity_embeddings = self.final_entity_embeddings_mean
         relation_embeddings = self.final_relation_embeddings_mean
         if self.variational:
+            entity_embeddings = entity_embeddings + torch.randn_like(entity_embeddings) * self.entity_logstddev.exp()
+            relation_embeddings = relation_embeddings + torch.randn_like(relation_embeddings) * self.relation_logstddev.exp()
+        return entity_embeddings, relation_embeddings
 
+    def forward(self, Corpus_, adj, batch_inputs):
+        entity_embeddings, relation_embeddings = self.get_sampled_embeddings()
         conv_input = torch.cat((entity_embeddings[batch_inputs[:, 0], :].unsqueeze(1), relation_embeddings[
             batch_inputs[:, 1]].unsqueeze(1), entity_embeddings[batch_inputs[:, 2], :].unsqueeze(1)), dim=1)
         out_conv = self.convKB(conv_input)
         return out_conv
 
     def batch_test(self, batch_inputs):
-        print(batch_inputs.shape)
+        # print(batch_inputs.shape)
         conv_input = torch.cat((self.final_entity_embeddings[batch_inputs[:, 0], :].unsqueeze(1), self.final_relation_embeddings[
             batch_inputs[:, 1]].unsqueeze(1), self.final_entity_embeddings[batch_inputs[:, 2], :].unsqueeze(1)), dim=1)
         out_conv = self.convKB(conv_input)

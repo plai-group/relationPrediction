@@ -80,6 +80,12 @@ def parse_args():
     args.add_argument("-drop_conv", "--drop_conv", type=float,
                       default=0.0, help="Dropout probability for convolution layer")
 
+    args.add_argument("-variational_conv", type=str2bool,
+                      help="Whether to do VI over embeddings.")
+    args.add_argument("-temperature_conv", type=float,
+                      help="Temperature for fitting variational distribution.")
+
+
     args = args.parse_args()
     return args
 
