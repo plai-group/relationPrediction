@@ -154,27 +154,27 @@ class ConvDecoder(ConvOrGAT):
         return nn.SoftMarginLoss()(preds.view(-1), train_values.view(-1))
 
     def prior_logpdf(self):
-        entity_embeddings, relation_embeddings = self.get_sampled_embeddings()
-        entity_sqr_distance = torch.norm(self.entity_embeddings_from_gat - entity_embeddings, 2)**2
-        relation_sqr_distance = torch.norm(self.relation_embeddings_from_gat - relation_embeddings, 2)**2
+        entity_embeddings, relation_embeddings = self.conv.get_sampled_embeddings()
+        entity_sqr_distance = torch.norm(self.conv.entity_embeddings_from_gat - entity_embeddings, 2)**2
+        relation_sqr_distance = torch.norm(self.conv.relation_embeddings_from_gat - relation_embeddings, 2)**2
         sqr_distance = entity_sqr_distance + relation_sqr_distance
-        print('distance for prior', sqr_distance)
-        prior_logpdf = 0.5 * sqr_distance / self.sigma_p**2
+        # print('distance for prior', entity_sqr_distance, relation_sqr_distance)
+        return -0.5 * sqr_distance / self.conv.sigma_p**2
 
     def temp_entropy_q(self):
 
-        std = torch.cat(self.entity_logstddev.exp(), self.relation_logstddev.exp())
+        std = torch.cat([self.conv.entity_logstddev.exp(), self.conv.relation_logstddev.exp()], dim=0)
         entropy_q = 0.5 * torch.log(2*math.pi*math.e*std**2).sum()
         return entropy_q * self.conv.temperature
 
     def loss(self, train_indices, train_values):
 
-        lik_logpdf = self.classifier_loss(train_indices, train_values)
+        likelihood_neg_logpdf = self.classifier_loss(train_indices, train_values)
         if self.conv.variational:
-            elbo_temp = self.prior_logpdf() + lik_logpdf - self.temp_entropy_q()
+            elbo_temp = self.prior_logpdf() - likelihood_neg_logpdf - self.temp_entropy_q()
             loss = -elbo_temp
         else:
-            loss = lik_logpdf
+            loss = likelihood_neg_logpdf
         self.log = {'loss': loss.item()}
         self.tqdm_text = str(self.log)
         return loss
@@ -361,6 +361,7 @@ class SpKBGATConvOnly(nn.Module):
         self.conv_out_channels = conv_out_channels
 
         self.variational = variational
+        self.temperature = temperature
         self.sigma_p = sigma_p
 
         assert final_entity_emb.shape == (self.num_nodes, emb_dim,)
