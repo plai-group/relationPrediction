@@ -151,14 +151,13 @@ class ConvDecoder(ConvOrGAT):
 
         preds = self.conv(
             self.corpus, self.corpus.train_adj_matrix, train_indices)
-        return nn.SoftMarginLoss()(preds.view(-1), train_values.view(-1))
+        return nn.SoftMarginLoss(reduction='sum')(preds.view(-1), train_values.view(-1))
 
     def prior_logpdf(self):
         entity_embeddings, relation_embeddings = self.conv.get_sampled_embeddings()
         entity_sqr_distance = torch.norm(self.conv.entity_embeddings_from_gat - entity_embeddings, 2)**2
         relation_sqr_distance = torch.norm(self.conv.relation_embeddings_from_gat - relation_embeddings, 2)**2
         sqr_distance = entity_sqr_distance + relation_sqr_distance
-        # print('distance for prior', entity_sqr_distance, relation_sqr_distance)
         return -0.5 * sqr_distance / self.conv.sigma_p**2
 
     def temp_entropy_q(self):
@@ -167,12 +166,19 @@ class ConvDecoder(ConvOrGAT):
         entropy_q = 0.5 * torch.log(2*math.pi*math.e*std**2).sum()
         return entropy_q * self.conv.temperature
 
+    def begin_epoch(self):
+
+        super().begin_epoch()
+
     def loss(self, train_indices, train_values):
 
         likelihood_neg_logpdf = self.classifier_loss(train_indices, train_values)
         if self.conv.variational:
-            elbo_temp = self.prior_logpdf() - likelihood_neg_logpdf - self.temp_entropy_q()
-            loss = -elbo_temp
+            B = len(train_values)
+            D = len(self.corpus.corpus.train_indices)
+            data_neg_logpdf = likelihood_neg_logpdf * D/B
+            elbo_temp = self.prior_logpdf() - data_neg_logpdf + self.temp_entropy_q()
+            loss = -elbo_temp * B/D
         else:
             loss = likelihood_neg_logpdf
         self.log = {'loss': loss.item()}
