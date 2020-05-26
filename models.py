@@ -166,10 +166,6 @@ class ConvDecoder(ConvOrGAT):
         entropy_q = 0.5 * torch.log(2*math.pi*math.e*std**2).sum()
         return entropy_q * self.conv.temperature
 
-    def begin_epoch(self):
-
-        super().begin_epoch()
-
     def loss(self, train_indices, train_values):
 
         likelihood_neg_logpdf = self.classifier_loss(train_indices, train_values)

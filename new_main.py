@@ -31,7 +31,6 @@ conv.conv.n_samples = 5
 conv.eval()
 with torch.no_grad():
     corpus = conv.train_loader.corpus.corpus
-    print(corpus.batch_size)
-    corpus.get_validation_pred(
+    corpus.get_auroc( # get_validation_pred(
         args, conv.conv, corpus.unique_entities_train
     )

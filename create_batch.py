@@ -9,6 +9,7 @@ import math
 import pickle
 import os
 
+from sklearn import metrics
 from preprocess import init_embedding, build_data
 
 # begin my additions ----------------------------------------------------------------
@@ -429,6 +430,44 @@ class Corpus:
         x = torch.norm(x, p=1, dim=1)
         return x
 
+    def corrupt_triple(self, triple):
+        def sample_different_entity(old):
+            new = np.random.randint(len(self.unique_entities_train))
+            if new != old:
+                return new
+            else:
+                return sample_different_entity(old)
+        corrupt_head = np.random.rand() > 0.5
+        if corrupt_head:
+            triple[0] = sample_different_entity(triple[0])
+        else:
+            triple[2] = sample_different_entity(triple[2])
+        return triple
+
+    def get_auroc(self, args, model, unique_entities):
+
+        scores = []
+        labels = []
+        n_batches = math.ceil(len(self.test_triples) / self.batch_size)
+        for batch_i in range(n_batches):
+
+            batch_start = batch_i * self.batch_size
+            pos_batch = self.test_triples[batch_start:batch_start+self.batch_size]
+            neg_batch = np.stack([self.corrupt_triple(tr)
+                                  for tr in np.copy(pos_batch)])
+            def to_tensor(arr):
+                return torch.tensor(arr).to(next(model.parameters())).long()
+            pos_scores = model.batch_test(to_tensor(pos_batch)).cpu().numpy()
+            neg_scores = model.batch_test(to_tensor(neg_batch)).cpu().numpy()
+            scores.extend([pos_scores, neg_scores])
+            labels.extend([np.ones(len(pos_scores)), np.zeros(len(neg_scores))])
+
+        scores = np.concatenate(scores)
+        labels = np.concatenate(labels)
+        auroc = metrics.roc_auc_score(labels, scores)
+        print(auroc)
+        return auroc
+
     def get_validation_pred(self, args, model, unique_entities):
         average_hits_at_100_head, average_hits_at_100_tail = [], []
         average_hits_at_ten_head, average_hits_at_ten_tail = [], []
@@ -441,7 +480,7 @@ class Corpus:
             start_time = time.time()
 
             indices = [i for i in range(len(self.test_indices))]
-            batch_indices = self.test_indices[indices, :]
+            batch_indices = self.test_indices[indices, :]  # ie batch_indices = self.test_indices ?
             print("Sampled indices")
             print("test set length ", len(self.test_indices))
             entity_list = [j for i, j in self.entity2id.items()]
